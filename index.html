@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Побег от квадратов</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="header">
+        <h1>Побег от квадратов</h1>
+        <p class="tagline">
+          Управляй кружком, избегай квадратов и держись как можно дольше!
+        </p>
+      </header>
+
+      <section class="hud" aria-live="polite">
+        <div class="stat">
+          <span class="label">Время:</span>
+          <span id="time" class="value">0.0 c</span>
+        </div>
+        <div class="stat">
+          <span class="label">Скорость:</span>
+          <span id="speed" class="value">0 ед./с</span>
+        </div>
+        <div class="stat">
+          <span class="label">Квадраты:</span>
+          <span id="enemy-count" class="value">0</span>
+        </div>
+      </section>
+
+      <div class="game-wrapper">
+        <canvas id="game" width="800" height="500" aria-label="Игровое поле"></canvas>
+        <div id="message" class="message hidden" role="alert">
+          <p id="message-text"></p>
+          <button id="restart" type="button" class="button">Играть снова</button>
+        </div>
+      </div>
+
+      <section class="instructions">
+        <h2>Как играть</h2>
+        <ul>
+          <li>Используй стрелки или клавиши <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd>, чтобы перемещать кружок.</li>
+          <li>Избегай всех квадратов. Со временем их будет становиться всё больше.</li>
+          <li>На сенсорных устройствах удерживай палец на игровом поле — герой побежит к точке касания.</li>
+          <li>Чем дольше ты держишься, тем меньше и быстрее становится кружок, а квадраты ускоряются.</li>
+          <li>Если квадрат коснётся тебя &mdash; игра окончена. Нажми «Играть снова», чтобы начать заново.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Сделано специально для тренировки реакции и скорости.
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
