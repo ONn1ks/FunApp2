@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Шторм треугольников</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="header">
+        <h1>Шторм треугольников</h1>
+        <p class="tagline">
+          Двигай светящийся кружок и уворачивайся от красных треугольников,
+          которые обрушиваются со всех сторон.
+        </p>
+      </header>
+
+      <section class="hud" aria-live="polite">
+        <div class="stat">
+          <span class="label">Время:</span>
+          <span id="time" class="value">0.0 c</span>
+        </div>
+        <div class="stat">
+          <span class="label">Рекорд:</span>
+          <span id="best" class="value">0.0 c</span>
+        </div>
+        <div class="stat">
+          <span class="label">Треугольники:</span>
+          <span id="triangle-count" class="value">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Скорость героя:</span>
+          <span id="speed" class="value">0 пикс/с</span>
+        </div>
+      </section>
+
+      <div class="game-wrapper">
+        <canvas
+          id="game"
+          width="800"
+          height="520"
+          aria-label="Игровое поле: увернись от атак треугольников"
+        ></canvas>
+        <div id="message" class="message hidden" role="alert">
+          <p id="message-title" class="message-title"></p>
+          <p id="message-detail" class="muted"></p>
+          <button id="restart" type="button" class="button">Играть снова</button>
+        </div>
+      </div>
+
+      <section class="instructions">
+        <h2>Как играть</h2>
+        <ul>
+          <li>
+            Ты &mdash; светящийся кружок в центре арены. Стрелки <kbd>←</kbd>
+            <kbd>→</kbd> или клавиши <kbd>A</kbd>/<kbd>D</kbd> двигают тебя влево
+            и вправо.
+          </li>
+          <li>
+            Красные треугольники прилетают сверху, снизу и с боков. Следи за
+            их траекториями и смещайся заранее.
+          </li>
+          <li>
+            Каждую секунду напряжение растёт: атаки ускоряются, врагов больше, а
+            кружок становится компактнее и проворнее.
+          </li>
+          <li>
+            Продержись как можно дольше, чтобы побить личный рекорд — игра
+            запоминает лучшее время.
+          </li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      Держи ритм и не подпускай треугольники слишком близко.
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
