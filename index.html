@@ -3,15 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Побег от квадратов</title>
+    <title>Шторм треугольников</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <main class="layout">
       <header class="header">
-        <h1>Побег от квадратов</h1>
+        <h1>Шторм треугольников</h1>
         <p class="tagline">
-          Управляй кружком, избегай квадратов и держись как можно дольше!
+          Двигай светящийся кружок и уворачивайся от красных треугольников,
+          которые обрушиваются со всех сторон.
         </p>
       </header>
 
@@ -21,19 +22,29 @@
           <span id="time" class="value">0.0 c</span>
         </div>
         <div class="stat">
-          <span class="label">Скорость:</span>
-          <span id="speed" class="value">0 ед./с</span>
+          <span class="label">Рекорд:</span>
+          <span id="best" class="value">0.0 c</span>
         </div>
         <div class="stat">
-          <span class="label">Квадраты:</span>
-          <span id="enemy-count" class="value">0</span>
+          <span class="label">Треугольники:</span>
+          <span id="triangle-count" class="value">0</span>
+        </div>
+        <div class="stat">
+          <span class="label">Скорость героя:</span>
+          <span id="speed" class="value">0 пикс/с</span>
         </div>
       </section>
 
       <div class="game-wrapper">
-        <canvas id="game" width="800" height="500" aria-label="Игровое поле"></canvas>
+        <canvas
+          id="game"
+          width="800"
+          height="520"
+          aria-label="Игровое поле: увернись от атак треугольников"
+        ></canvas>
         <div id="message" class="message hidden" role="alert">
-          <p id="message-text"></p>
+          <p id="message-title" class="message-title"></p>
+          <p id="message-detail" class="muted"></p>
           <button id="restart" type="button" class="button">Играть снова</button>
         </div>
       </div>
@@ -41,17 +52,29 @@
       <section class="instructions">
         <h2>Как играть</h2>
         <ul>
-          <li>Используй стрелки или клавиши <kbd>W</kbd>, <kbd>A</kbd>, <kbd>S</kbd>, <kbd>D</kbd>, чтобы перемещать кружок.</li>
-          <li>Избегай всех квадратов. Со временем их будет становиться всё больше.</li>
-          <li>На сенсорных устройствах удерживай палец на игровом поле — герой побежит к точке касания.</li>
-          <li>Чем дольше ты держишься, тем меньше и быстрее становится кружок, а квадраты ускоряются.</li>
-          <li>Если квадрат коснётся тебя &mdash; игра окончена. Нажми «Играть снова», чтобы начать заново.</li>
+          <li>
+            Ты &mdash; светящийся кружок в центре арены. Стрелки <kbd>←</kbd>
+            <kbd>→</kbd> или клавиши <kbd>A</kbd>/<kbd>D</kbd> двигают тебя влево
+            и вправо.
+          </li>
+          <li>
+            Красные треугольники прилетают сверху, снизу и с боков. Следи за
+            их траекториями и смещайся заранее.
+          </li>
+          <li>
+            Каждую секунду напряжение растёт: атаки ускоряются, врагов больше, а
+            кружок становится компактнее и проворнее.
+          </li>
+          <li>
+            Продержись как можно дольше, чтобы побить личный рекорд — игра
+            запоминает лучшее время.
+          </li>
         </ul>
       </section>
     </main>
 
     <footer class="footer">
-      Сделано специально для тренировки реакции и скорости.
+      Держи ритм и не подпускай треугольники слишком близко.
     </footer>
 
     <script src="script.js"></script>

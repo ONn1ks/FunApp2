@@ -1,56 +1,65 @@
 (() => {
   const canvas = document.getElementById("game");
+  if (!canvas) {
+    return;
+  }
   const ctx = canvas.getContext("2d");
 
   const hud = {
     time: document.getElementById("time"),
+    best: document.getElementById("best"),
     speed: document.getElementById("speed"),
-    enemies: document.getElementById("enemy-count"),
+    triangles: document.getElementById("triangle-count"),
   };
 
   const messageEl = document.getElementById("message");
-  const messageText = document.getElementById("message-text");
+  const messageTitleEl = document.getElementById("message-title");
+  const messageDetailEl = document.getElementById("message-detail");
   const restartButton = document.getElementById("restart");
 
   const keys = new Set();
-  const pointer = { active: false, id: null, x: 0, y: 0 };
+  const pointer = { active: false, id: null, x: 0 };
 
   const keyBindings = {
-    arrowup: "up",
-    arrowdown: "down",
     arrowleft: "left",
     arrowright: "right",
-    w: "up",
-    s: "down",
     a: "left",
     d: "right",
   };
 
   const settings = {
+    fieldPadding: 28,
+    outMargin: 140,
     player: {
-      baseRadius: 26,
-      minRadius: 9,
-      shrinkRate: 0.55, // радиус уменьшается на 0.55 пикселя в секунду
-      baseSpeed: 220,
-      speedGrowth: 18,
-      color: "#38bdf8",
+      baseRadius: 28,
+      minRadius: 14,
+      shrinkPerSecond: 0.32,
+      baseSpeed: 230,
+      speedGrowth: 5.4,
+      maxSpeed: 420,
     },
-    enemy: {
-      baseSpeed: 110,
-      speedGrowth: 22,
-      baseSize: 30,
-      maxSize: 46,
-      sizeGrowth: 0.35,
-      wobbleStrength: 0.35,
+    triangle: {
+      baseSpeed: 150,
+      speedGrowth: 6.2,
+      maxSpeed: 520,
+      minSize: 20,
+      maxSize: 36,
+      sizeGrowth: 0.28,
+      wobbleAmplitude: 0.18,
+      wobbleFrequency: [2.2, 4.6],
+      collisionScale: 0.58,
     },
     spawn: {
-      initialInterval: 2.4,
-      minInterval: 0.7,
-      acceleration: 0.055,
+      initialDelay: 0.8,
+      baseInterval: 1.4,
+      minInterval: 0.32,
+      acceleration: 0.018,
+      burstAfter: 16,
+      burstProbability: 0.32,
     },
   };
 
-  const STORAGE_KEY = "escapeSquaresBestTime";
+  const STORAGE_KEY = "triangleStormBestTime";
 
   const player = {
     x: canvas.width / 2,
@@ -62,20 +71,457 @@
   const gameState = {
     active: false,
     elapsed: 0,
-    lastTimestamp: 0,
-    spawnTimer: settings.spawn.initialInterval,
-    enemies: [],
+    spawnTimer: settings.spawn.initialDelay,
+    triangles: [],
     bestTime: 0,
   };
 
-  loadBestTime();
+  let lastFrameTime = 0;
 
-  function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
+  loadBestTime();
+  updateHud();
+
+  restartButton?.addEventListener("click", () => {
+    resetGame();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    if (!gameState.active && !messageEl.classList.contains("hidden") && (key === "enter" || key === " ")) {
+      event.preventDefault();
+      resetGame();
+      return;
+    }
+
+    const binding = keyBindings[key];
+    if (binding) {
+      event.preventDefault();
+      keys.add(binding);
+    }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    const key = event.key.toLowerCase();
+    const binding = keyBindings[key];
+    if (binding) {
+      keys.delete(binding);
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    keys.clear();
+    pointer.active = false;
+    pointer.id = null;
+  });
+
+  canvas.addEventListener("pointerdown", (event) => {
+    canvas.setPointerCapture(event.pointerId);
+    pointer.active = true;
+    pointer.id = event.pointerId;
+    updatePointerPosition(event);
+    event.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!pointer.active || pointer.id !== event.pointerId) {
+      return;
+    }
+    updatePointerPosition(event);
+  });
+
+  const endPointer = (event) => {
+    if (pointer.id === event.pointerId) {
+      pointer.active = false;
+      pointer.id = null;
+    }
+  };
+
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+  canvas.addEventListener("lostpointercapture", () => {
+    pointer.active = false;
+    pointer.id = null;
+  });
+
+  resetGame();
+  requestAnimationFrame(loop);
+
+  function loop(timestamp) {
+    if (!lastFrameTime) {
+      lastFrameTime = timestamp;
+    }
+
+    const delta = Math.min((timestamp - lastFrameTime) / 1000, 0.12);
+    if (gameState.active) {
+      updateGame(delta);
+    }
+
+    lastFrameTime = timestamp;
+    render();
+    requestAnimationFrame(loop);
   }
 
-  function randomBetween(min, max) {
-    return Math.random() * (max - min) + min;
+  function resetGame() {
+    gameState.active = true;
+    gameState.elapsed = 0;
+    gameState.spawnTimer = settings.spawn.initialDelay;
+    gameState.triangles = [];
+
+    player.x = canvas.width / 2;
+    player.y = canvas.height / 2;
+    player.radius = settings.player.baseRadius;
+    player.speed = settings.player.baseSpeed;
+
+    keys.clear();
+    pointer.active = false;
+    pointer.id = null;
+
+    messageEl.classList.add("hidden");
+    messageTitleEl.textContent = "";
+    messageDetailEl.textContent = "";
+
+    lastFrameTime = 0;
+    updateHud();
+  }
+
+  function updateGame(delta) {
+    gameState.elapsed += delta;
+    gameState.spawnTimer -= delta;
+
+    while (gameState.spawnTimer <= 0) {
+      spawnTriangle();
+      if (
+        gameState.elapsed > settings.spawn.burstAfter &&
+        Math.random() < settings.spawn.burstProbability
+      ) {
+        const extra = Math.min(
+          2,
+          1 + Math.floor((gameState.elapsed - settings.spawn.burstAfter) / 12)
+        );
+        for (let i = 0; i < extra; i += 1) {
+          spawnTriangle();
+        }
+      }
+      gameState.spawnTimer += nextSpawnInterval();
+    }
+
+    updatePlayer(delta);
+    updateTriangles(delta);
+    updateHud();
+  }
+
+  function updatePlayer(delta) {
+    player.radius = Math.max(
+      settings.player.minRadius,
+      player.radius - settings.player.shrinkPerSecond * delta
+    );
+
+    const targetSpeed = clamp(
+      settings.player.baseSpeed + gameState.elapsed * settings.player.speedGrowth,
+      settings.player.baseSpeed,
+      settings.player.maxSpeed
+    );
+    player.speed = targetSpeed;
+
+    const input = horizontalInput();
+    if (input !== 0) {
+      player.x += input * player.speed * delta;
+    }
+
+    const minX = settings.fieldPadding + player.radius;
+    const maxX = canvas.width - settings.fieldPadding - player.radius;
+    player.x = clamp(player.x, minX, maxX);
+  }
+
+  function horizontalInput() {
+    if (pointer.active) {
+      const dx = pointer.x - player.x;
+      if (Math.abs(dx) < 1.5) {
+        return 0;
+      }
+      return clamp(dx / (player.speed * 0.08), -1, 1);
+    }
+
+    let direction = 0;
+    if (keys.has("left")) {
+      direction -= 1;
+    }
+    if (keys.has("right")) {
+      direction += 1;
+    }
+    return direction;
+  }
+
+  function updateTriangles(delta) {
+    const alive = [];
+    const out = settings.outMargin;
+
+    for (const triangle of gameState.triangles) {
+      triangle.x += triangle.vx * delta;
+      triangle.y += triangle.vy * delta;
+      triangle.age += delta;
+      triangle.rotation =
+        triangle.baseAngle +
+        Math.sin(triangle.age * triangle.wobbleFrequency) * triangle.wobbleAmplitude;
+
+      const dx = triangle.x - player.x;
+      const dy = triangle.y - player.y;
+      const collisionDistance = player.radius + triangle.collisionRadius;
+      if (dx * dx + dy * dy <= collisionDistance * collisionDistance) {
+        gameOver();
+        return;
+      }
+
+      if (
+        triangle.x < -out ||
+        triangle.x > canvas.width + out ||
+        triangle.y < -out ||
+        triangle.y > canvas.height + out
+      ) {
+        continue;
+      }
+
+      alive.push(triangle);
+    }
+
+    gameState.triangles = alive;
+  }
+
+  function render() {
+    drawBackdrop();
+    drawTriangles();
+    drawPlayer();
+  }
+
+  function drawBackdrop() {
+    const { width, height } = canvas;
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, "#060d1c");
+    gradient.addColorStop(1, "#0a1428");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+
+    const radial = ctx.createRadialGradient(
+      width / 2,
+      height / 2,
+      height * 0.12,
+      width / 2,
+      height / 2,
+      width * 0.9
+    );
+    radial.addColorStop(0, "rgba(37, 99, 235, 0.08)");
+    radial.addColorStop(1, "rgba(15, 23, 42, 0.02)");
+    ctx.fillStyle = radial;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = "#1e293b";
+    ctx.lineWidth = 1;
+    const stripes = 8;
+    for (let i = 1; i < stripes; i += 1) {
+      const y = (height / stripes) * i + Math.sin((gameState.elapsed + i) * 0.8) * 4;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y);
+
+    const glow = ctx.createRadialGradient(0, 0, player.radius * 0.2, 0, 0, player.radius);
+    glow.addColorStop(0, "#a5f3fc");
+    glow.addColorStop(1, "#0ea5e9");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.9)";
+    ctx.stroke();
+
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "rgba(94, 234, 212, 0.45)";
+    ctx.beginPath();
+    ctx.arc(0, 0, player.radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawTriangles() {
+    for (const triangle of gameState.triangles) {
+      ctx.save();
+      ctx.translate(triangle.x, triangle.y);
+      ctx.rotate(triangle.rotation);
+
+      const gradient = ctx.createLinearGradient(0, -triangle.size, 0, triangle.size);
+      gradient.addColorStop(0, triangle.colorBright);
+      gradient.addColorStop(1, triangle.colorDark);
+      ctx.fillStyle = gradient;
+
+      ctx.beginPath();
+      ctx.moveTo(0, -triangle.size * 0.85);
+      ctx.lineTo(triangle.size * 0.75, triangle.size * 0.8);
+      ctx.lineTo(-triangle.size * 0.75, triangle.size * 0.8);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = "rgba(248, 113, 113, 0.7)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function spawnTriangle() {
+    const sizeBase = randomBetween(settings.triangle.minSize, settings.triangle.maxSize);
+    const size = Math.min(
+      sizeBase + gameState.elapsed * settings.triangle.sizeGrowth,
+      settings.triangle.maxSize + 8
+    );
+
+    const spawnPosition = randomSpawnPosition(size);
+    const speed = clamp(
+      settings.triangle.baseSpeed + gameState.elapsed * settings.triangle.speedGrowth + randomBetween(-18, 24),
+      settings.triangle.baseSpeed,
+      settings.triangle.maxSpeed
+    );
+
+    const targetX = clamp(
+      player.x + randomBetween(-canvas.width * 0.3, canvas.width * 0.3),
+      settings.fieldPadding,
+      canvas.width - settings.fieldPadding
+    );
+    const targetY = player.y + randomBetween(-canvas.height * 0.04, canvas.height * 0.04);
+
+    const dx = targetX - spawnPosition.x;
+    const dy = targetY - spawnPosition.y;
+    const distance = Math.hypot(dx, dy) || 1;
+
+    const vx = (dx / distance) * speed;
+    const vy = (dy / distance) * speed;
+    const baseAngle = Math.atan2(vy, vx) + Math.PI / 2;
+    const wobbleFrequency = randomBetween(
+      settings.triangle.wobbleFrequency[0],
+      settings.triangle.wobbleFrequency[1]
+    );
+    const wobbleAmplitude = settings.triangle.wobbleAmplitude * randomBetween(0.6, 1.4);
+
+    const hue = (360 + randomBetween(350, 370)) % 360;
+    const triangle = {
+      x: spawnPosition.x,
+      y: spawnPosition.y,
+      vx,
+      vy,
+      size,
+      age: 0,
+      baseAngle,
+      rotation: baseAngle,
+      wobbleFrequency,
+      wobbleAmplitude,
+      collisionRadius: size * settings.triangle.collisionScale,
+      colorBright: `hsl(${hue}, 88%, 66%)`,
+      colorDark: `hsl(${hue}, 78%, 46%)`,
+    };
+
+    gameState.triangles.push(triangle);
+  }
+
+  function randomSpawnPosition(size) {
+    const margin = size + 24;
+    const side = Math.floor(Math.random() * 8);
+    const horizontalFocus = clamp(
+      player.x + randomBetween(-canvas.width * 0.35, canvas.width * 0.35),
+      -margin,
+      canvas.width + margin
+    );
+    const verticalFocus = clamp(
+      player.y + randomBetween(-canvas.height * 0.25, canvas.height * 0.25),
+      -margin,
+      canvas.height + margin
+    );
+
+    switch (side) {
+      case 0:
+        return { x: horizontalFocus, y: -margin };
+      case 1:
+        return { x: horizontalFocus, y: canvas.height + margin };
+      case 2:
+        return { x: -margin, y: verticalFocus };
+      case 3:
+        return { x: canvas.width + margin, y: verticalFocus };
+      case 4:
+        return { x: -margin, y: -margin };
+      case 5:
+        return { x: canvas.width + margin, y: -margin };
+      case 6:
+        return { x: -margin, y: canvas.height + margin };
+      default:
+        return { x: canvas.width + margin, y: canvas.height + margin };
+    }
+  }
+
+  function nextSpawnInterval() {
+    const difficulty = Math.min(gameState.elapsed, 60);
+    const base = Math.max(
+      settings.spawn.minInterval,
+      settings.spawn.baseInterval - difficulty * settings.spawn.acceleration
+    );
+    const variation = base * 0.35;
+    return Math.max(settings.spawn.minInterval, base + randomBetween(-variation, variation * 0.7));
+  }
+
+  function gameOver() {
+    if (!gameState.active) {
+      return;
+    }
+
+    gameState.active = false;
+    pointer.active = false;
+    pointer.id = null;
+    keys.clear();
+
+    const finalTime = gameState.elapsed;
+    let newRecord = false;
+    if (finalTime > gameState.bestTime) {
+      gameState.bestTime = finalTime;
+      saveBestTime();
+      newRecord = true;
+    }
+
+    updateHud();
+
+    messageTitleEl.textContent = newRecord ? "Новый рекорд!" : "Треугольники поймали";
+    messageDetailEl.textContent = `Твой результат: ${finalTime.toFixed(1)} c. Лучшее время: ${gameState.bestTime.toFixed(1)} c.`;
+    messageEl.classList.remove("hidden");
+  }
+
+  function updatePointerPosition(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    pointer.x = (event.clientX - rect.left) * scaleX;
+  }
+
+  function updateHud() {
+    if (hud.time) {
+      hud.time.textContent = `${gameState.elapsed.toFixed(1)} c`;
+    }
+    if (hud.best) {
+      hud.best.textContent = `${gameState.bestTime.toFixed(1)} c`;
+    }
+    if (hud.speed) {
+      hud.speed.textContent = `${Math.round(player.speed)} пикс/с`;
+    }
+    if (hud.triangles) {
+      hud.triangles.textContent = `${gameState.triangles.length}`;
+    }
   }
 
   function loadBestTime() {
@@ -88,7 +534,7 @@
         }
       }
     } catch (error) {
-      // Игнорируем ошибки доступа к хранилищу (например, приватный режим)
+      // Ignore storage errors (e.g., private mode)
     }
   }
 
@@ -96,377 +542,15 @@
     try {
       localStorage.setItem(STORAGE_KEY, gameState.bestTime.toFixed(2));
     } catch (error) {
-      // Игнорируем ошибки доступа к хранилищу
+      // Ignore storage errors
     }
   }
 
-  function resetGame() {
-    gameState.active = true;
-    gameState.elapsed = 0;
-    gameState.lastTimestamp = 0;
-    gameState.spawnTimer = settings.spawn.initialInterval;
-    gameState.enemies = [];
-
-    player.x = canvas.width / 2;
-    player.y = canvas.height / 2;
-    player.radius = settings.player.baseRadius;
-    player.speed = settings.player.baseSpeed;
-
-    pointer.active = false;
-    keys.clear();
-
-    messageEl.classList.add("hidden");
-    updateHud();
-    spawnEnemy();
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
   }
 
-  function updatePointerPosition(event) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    pointer.x = (event.clientX - rect.left) * scaleX;
-    pointer.y = (event.clientY - rect.top) * scaleY;
+  function randomBetween(min, max) {
+    return Math.random() * (max - min) + min;
   }
-
-  function spawnEnemy() {
-    const elapsed = gameState.elapsed;
-    const size = clamp(
-      settings.enemy.baseSize + elapsed * settings.enemy.sizeGrowth + randomBetween(-2, 4),
-      settings.enemy.baseSize * 0.85,
-      settings.enemy.maxSize
-    );
-
-    let spawnPosition = null;
-    let attempts = 0;
-    const minDistance = 140;
-    while (attempts < 12 && (!spawnPosition || distance(spawnPosition, player) < minDistance)) {
-      spawnPosition = randomEdgePosition(size);
-      attempts += 1;
-    }
-
-    const enemy = {
-      x: spawnPosition.x,
-      y: spawnPosition.y,
-      size,
-      baseSpeed: settings.enemy.baseSpeed + randomBetween(-10, 30),
-      wobbleOffset: Math.random() * Math.PI * 2,
-      wobbleSpeed: randomBetween(0.8, 1.6),
-    };
-
-    gameState.enemies.push(enemy);
-    updateHud();
-  }
-
-  function randomEdgePosition(size) {
-    const half = size / 2;
-    const margin = 24;
-    const side = Math.floor(Math.random() * 4);
-    switch (side) {
-      case 0:
-        return {
-          x: half + margin,
-          y: randomBetween(half + margin, canvas.height - half - margin),
-        };
-      case 1:
-        return {
-          x: canvas.width - half - margin,
-          y: randomBetween(half + margin, canvas.height - half - margin),
-        };
-      case 2:
-        return {
-          x: randomBetween(half + margin, canvas.width - half - margin),
-          y: half + margin,
-        };
-      default:
-        return {
-          x: randomBetween(half + margin, canvas.width - half - margin),
-          y: canvas.height - half - margin,
-        };
-    }
-  }
-
-  function distance(a, b) {
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
-    return Math.hypot(dx, dy);
-  }
-
-  function nextSpawnInterval() {
-    const base = Math.max(
-      settings.spawn.minInterval,
-      settings.spawn.initialInterval - settings.spawn.acceleration * gameState.elapsed
-    );
-    const variation = base * 0.35;
-    return clamp(
-      base + randomBetween(-variation / 2, variation / 2),
-      settings.spawn.minInterval,
-      settings.spawn.initialInterval
-    );
-  }
-
-  function circleSquareCollision(circle, square) {
-    const half = square.size / 2;
-    const closestX = clamp(circle.x, square.x - half, square.x + half);
-    const closestY = clamp(circle.y, square.y - half, square.y + half);
-    const dx = circle.x - closestX;
-    const dy = circle.y - closestY;
-    return dx * dx + dy * dy <= circle.radius * circle.radius;
-  }
-
-  function updateHud() {
-    hud.time.textContent = `${gameState.elapsed.toFixed(1)} c`;
-    hud.speed.textContent = `${Math.round(player.speed)} ед./с`;
-    hud.enemies.textContent = `${gameState.enemies.length}`;
-  }
-
-  function endGame() {
-    if (!gameState.active) {
-      return;
-    }
-
-    gameState.active = false;
-    pointer.active = false;
-
-    const survived = gameState.elapsed;
-    const newRecord = survived > gameState.bestTime;
-
-    if (newRecord) {
-      gameState.bestTime = survived;
-      saveBestTime();
-    }
-
-    const survivedText = survived.toFixed(1);
-    const bestText = gameState.bestTime > 0 ? gameState.bestTime.toFixed(1) : survivedText;
-    const resultLine = newRecord
-      ? "<strong>Новый рекорд!</strong>"
-      : `Твой лучший результат: <strong>${bestText} c</strong>.`;
-
-    messageText.innerHTML = `Пойман! Ты продержался <strong>${survivedText} c</strong>.<br />${resultLine}<br /><span class="muted">Нажми Enter или кнопку ниже, чтобы сыграть снова.</span>`;
-
-    messageEl.classList.remove("hidden");
-    window.setTimeout(() => restartButton.focus({ preventScroll: true }), 80);
-  }
-
-  function update(dt) {
-    gameState.elapsed += dt;
-
-    player.radius = clamp(
-      settings.player.baseRadius - settings.player.shrinkRate * gameState.elapsed,
-      settings.player.minRadius,
-      settings.player.baseRadius
-    );
-    player.speed = settings.player.baseSpeed + settings.player.speedGrowth * gameState.elapsed;
-
-    let moveX = 0;
-    let moveY = 0;
-
-    if (keys.has("up")) moveY -= 1;
-    if (keys.has("down")) moveY += 1;
-    if (keys.has("left")) moveX -= 1;
-    if (keys.has("right")) moveX += 1;
-
-    if (pointer.active) {
-      const dx = pointer.x - player.x;
-      const dy = pointer.y - player.y;
-      const pointerDistance = Math.hypot(dx, dy);
-      if (pointerDistance > 2) {
-        moveX = dx / pointerDistance;
-        moveY = dy / pointerDistance;
-      }
-    }
-
-    if (moveX !== 0 || moveY !== 0) {
-      const length = Math.hypot(moveX, moveY) || 1;
-      player.x += (moveX / length) * player.speed * dt;
-      player.y += (moveY / length) * player.speed * dt;
-    }
-
-    player.x = clamp(player.x, player.radius, canvas.width - player.radius);
-    player.y = clamp(player.y, player.radius, canvas.height - player.radius);
-
-    gameState.spawnTimer -= dt;
-    if (gameState.spawnTimer <= 0) {
-      spawnEnemy();
-      gameState.spawnTimer = nextSpawnInterval();
-    }
-
-    for (const enemy of gameState.enemies) {
-      const dx = player.x - enemy.x;
-      const dy = player.y - enemy.y;
-      const baseAngle = Math.atan2(dy, dx);
-      const wobble = Math.sin(gameState.elapsed * enemy.wobbleSpeed + enemy.wobbleOffset) * settings.enemy.wobbleStrength;
-      const angle = baseAngle + wobble;
-      const speed = enemy.baseSpeed + gameState.elapsed * settings.enemy.speedGrowth;
-
-      enemy.x += Math.cos(angle) * speed * dt;
-      enemy.y += Math.sin(angle) * speed * dt;
-
-      const half = enemy.size / 2;
-      enemy.x = clamp(enemy.x, half, canvas.width - half);
-      enemy.y = clamp(enemy.y, half, canvas.height - half);
-
-      if (circleSquareCollision(player, enemy)) {
-        endGame();
-        break;
-      }
-    }
-
-    updateHud();
-  }
-
-  function drawBackground() {
-    const { width, height } = canvas;
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, "#0f172a");
-    gradient.addColorStop(1, "#020617");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-
-    const gridSize = 40;
-    const offset = (gameState.elapsed * 40) % gridSize;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(148, 163, 184, 0.1)";
-
-    ctx.beginPath();
-    for (let x = -gridSize; x < width + gridSize; x += gridSize) {
-      const xPos = x + offset;
-      ctx.moveTo(xPos, 0);
-      ctx.lineTo(xPos, height);
-    }
-    for (let y = -gridSize; y < height + gridSize; y += gridSize) {
-      const yPos = y + offset;
-      ctx.moveTo(0, yPos);
-      ctx.lineTo(width, yPos);
-    }
-    ctx.stroke();
-  }
-
-  function drawPlayer() {
-    ctx.save();
-    ctx.shadowColor = "rgba(56, 189, 248, 0.7)";
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = settings.player.color;
-    ctx.beginPath();
-    ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(226, 232, 240, 0.6)";
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawEnemies() {
-    const elapsed = gameState.elapsed;
-    for (const enemy of gameState.enemies) {
-      ctx.save();
-      ctx.translate(enemy.x, enemy.y);
-      const spin = Math.sin(elapsed * enemy.wobbleSpeed + enemy.wobbleOffset) * 0.25;
-      ctx.rotate(spin);
-      const size = enemy.size;
-      const half = size / 2;
-      const gradient = ctx.createLinearGradient(-half, -half, half, half);
-      gradient.addColorStop(0, "#ef4444");
-      gradient.addColorStop(1, "#b91c1c");
-      ctx.fillStyle = gradient;
-      ctx.shadowColor = "rgba(239, 68, 68, 0.5)";
-      ctx.shadowBlur = 16;
-      ctx.fillRect(-half, -half, size, size);
-      ctx.restore();
-    }
-  }
-
-  function draw() {
-    drawBackground();
-    drawEnemies();
-    drawPlayer();
-
-    if (!gameState.active) {
-      ctx.save();
-      ctx.fillStyle = "rgba(15, 23, 42, 0.35)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.restore();
-    }
-  }
-
-  function gameLoop(timestamp) {
-    if (!gameState.lastTimestamp) {
-      gameState.lastTimestamp = timestamp;
-    }
-    const delta = (timestamp - gameState.lastTimestamp) / 1000;
-    gameState.lastTimestamp = timestamp;
-
-    if (gameState.active) {
-      update(Math.min(delta, 0.1));
-    }
-
-    draw();
-    requestAnimationFrame(gameLoop);
-  }
-
-  window.addEventListener("keydown", (event) => {
-    const key = event.key.toLowerCase();
-    const action = keyBindings[key];
-    if (action) {
-      event.preventDefault();
-      keys.add(action);
-      return;
-    }
-
-    if (!gameState.active && (event.key === "Enter" || event.code === "Space")) {
-      event.preventDefault();
-      resetGame();
-    }
-  });
-
-  window.addEventListener("keyup", (event) => {
-    const key = event.key.toLowerCase();
-    const action = keyBindings[key];
-    if (action) {
-      event.preventDefault();
-      keys.delete(action);
-    }
-  });
-
-  window.addEventListener("blur", () => {
-    keys.clear();
-    pointer.active = false;
-  });
-
-  restartButton.addEventListener("click", () => {
-    resetGame();
-  });
-
-  canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-
-  canvas.addEventListener("pointerdown", (event) => {
-    pointer.active = true;
-    pointer.id = event.pointerId;
-    updatePointerPosition(event);
-    canvas.setPointerCapture(event.pointerId);
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (!pointer.active || (pointer.id !== null && event.pointerId !== pointer.id)) {
-      return;
-    }
-    updatePointerPosition(event);
-  });
-
-  canvas.addEventListener("pointerup", (event) => {
-    if (event.pointerId === pointer.id) {
-      pointer.active = false;
-      pointer.id = null;
-      canvas.releasePointerCapture(event.pointerId);
-    }
-  });
-
-  canvas.addEventListener("pointerleave", () => {
-    pointer.active = false;
-    pointer.id = null;
-  });
-
-  resetGame();
-  requestAnimationFrame(gameLoop);
 })();
